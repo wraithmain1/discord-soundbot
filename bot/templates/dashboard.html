@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Sound Bot Dashboard</title>
+    <style>
+        body { font-family: sans-serif; background: #1e1f22; color: #eee; padding: 2rem; }
+        h2, h3 { color: #fff; }
+        table { border-collapse: collapse; width: 100%; max-width: 700px; }
+        th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #3a3b3f; }
+        select { padding: 0.4rem; background: #2b2d31; color: #eee; border: 1px solid #444; border-radius: 4px; }
+        input[type=file] { color: #eee; }
+        button { padding: 0.4rem 0.9rem; background: #5865f2; color: white; border: none;
+                 border-radius: 4px; cursor: pointer; }
+        button:hover { background: #4752c4; }
+        .upload-box { margin-top: 2rem; padding: 1.2rem; background: #2b2d31; border-radius: 8px; max-width: 400px; }
+        .logout-form { float: right; }
+        .error { color: #f04747; }
+        tr form { display: contents; }
+    </style>
+</head>
+<body>
+    <form method="post" action="/logout" class="logout-form"><button type="submit">Log out</button></form>
+    <h2>🔊 Discord Sound Bot</h2>
+
+    {% if request.query_params.get('error') == 'invalid_type' %}
+        <p class="error">Only .mp3 files are supported.</p>
+    {% elif request.query_params.get('error') == 'too_large' %}
+        <p class="error">That file is over the 10 MB limit.</p>
+    {% endif %}
+
+    <h3>User Assignments</h3>
+    <table>
+        <tr><th>User</th><th>Assigned sound</th><th></th></tr>
+        {% for a in assignments %}
+        <tr>
+            <form method="post" action="/assign">
+                <td>{{ a.label }}<input type="hidden" name="user_id" value="{{ a.id }}"></td>
+                <td>
+                    <select name="sound_filename">
+                        <option value="">-- none --</option>
+                        {% for s in sounds %}
+                        <option value="{{ s }}" {% if s == a.current %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+                <td><button type="submit">Save</button></td>
+            </form>
+        </tr>
+        {% endfor %}
+        {% if not assignments %}
+        <tr><td colspan="3">No members found yet — make sure the bot has joined your server(s).</td></tr>
+        {% endif %}
+    </table>
+
+    <div class="upload-box">
+        <h3>Upload a sound</h3>
+        <form method="post" action="/upload" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".mp3" required>
+            <button type="submit">Upload</button>
+        </form>
+    </div>
+</body>
+</html>
