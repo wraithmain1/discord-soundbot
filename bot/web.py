@@ -42,7 +42,7 @@ def _logged_in(request: Request) -> bool:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
 @app.post("/login")
@@ -51,7 +51,7 @@ async def login_submit(request: Request, username: str = Form(...), password: st
         request.session["logged_in"] = True
         return RedirectResponse("/", status_code=303)
     return templates.TemplateResponse(
-        "login.html", {"request": request, "error": "Invalid username or password"}
+        request, "login.html", {"error": "Invalid username or password"}
     )
 
 
@@ -77,8 +77,9 @@ async def dashboard(request: Request):
     ]
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
-        {"request": request, "assignments": assignments, "sounds": sounds},
+        {"assignments": assignments, "sounds": sounds},
     )
 
 
