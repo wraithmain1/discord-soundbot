@@ -114,6 +114,26 @@ class SoundBot(discord.Client):
             for uid, label in sorted(members.items(), key=lambda x: x[1].lower())
         ]
 
+    def get_voice_channels(self) -> list[dict]:
+        """Used by the web UI to populate the manual 'play in Discord' dropdown."""
+        channels = []
+        for guild in self.guilds:
+            for channel in guild.voice_channels:
+                channels.append({"id": str(channel.id), "label": f"{guild.name} / {channel.name}"})
+        return sorted(channels, key=lambda c: c["label"].lower())
+
+    async def play_now(self, channel_id: int, sound_path: Path) -> bool:
+        """Manually queue a sound in a specific voice channel, bypassing cooldown
+        (this is an explicit user action from the dashboard, not a voice-state event).
+        Returns False if the channel id doesn't resolve to a real voice channel.
+        """
+        channel = self.get_channel(channel_id)
+        if not isinstance(channel, discord.VoiceChannel):
+            return False
+        await self._enqueue(channel, sound_path)
+        return True
+
+
     async def on_voice_state_update(
         self,
         member: discord.Member,

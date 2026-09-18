@@ -9,7 +9,7 @@ import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -27,6 +27,7 @@ SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {".mp3", ".m4a"}
+CONTENT_TYPES = {".mp3": "audio/mpeg", ".m4a": "audio/mp4"}
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -81,6 +82,7 @@ async def dashboard(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     members = bot_instance.get_member_list() if bot_instance else []
+    voice_channels = bot_instance.get_voice_channels() if bot_instance else []
     sound_map = load_sound_map()
     sound_files = _list_sound_files()
     settings = load_settings()
@@ -109,6 +111,8 @@ async def dashboard(request: Request):
             "sounds": sound_files,
             "sound_list": sounds,
             "settings": settings,
+            "voice_channels": voice_channels,
+            "played": request.query_params.get("played"),
         },
     )
 
@@ -171,6 +175,46 @@ async def assign_sound(request: Request, user_id: str = Form(...), sound_filenam
     save_sound_map(sound_map)
 
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/sounds/{filename}")
+async def serve_sound(request: Request, filename: str):
+    """Serves an uploaded sound file so the dashboard can preview it in-browser.
+    Login-gated like everything else here - not a public file server.
+    """
+    if not _logged_in(request):
+        return RedirectResponse("/login", status_code=303)
+
+    safe_name = Path(filename).name  # guard against path traversal
+    suffix = Path(safe_name).suffix.lower()
+    target = SOUNDS_DIR / safe_name
+    if suffix not in ALLOWED_EXTENSIONS or not target.exists():
+        return RedirectResponse("/", status_code=303)
+
+    return FileResponse(target, media_type=CONTENT_TYPES.get(suffix, "application/octet-stream"))
+
+
+@app.post("/play-sound")
+async def play_sound_now(request: Request, filename: str = Form(...), channel_id: str = Form(...)):
+    """Manually plays a sound through the bot in a chosen voice channel -
+    useful for testing without waiting for a real join/move event."""
+    if not _logged_in(request):
+        return RedirectResponse("/login", status_code=303)
+
+    safe_name = Path(filename).name
+    target = SOUNDS_DIR / safe_name
+    if target.suffix.lower() not in ALLOWED_EXTENSIONS or not target.exists():
+        return RedirectResponse("/?error=invalid_type", status_code=303)
+
+    if not channel_id or not bot_instance:
+        return RedirectResponse("/", status_code=303)
+
+    try:
+        ok = await bot_instance.play_now(int(channel_id), target)
+    except ValueError:
+        ok = False
+
+    return RedirectResponse(f"/?played={'1' if ok else '0'}", status_code=303)
 
 
 @app.post("/settings")

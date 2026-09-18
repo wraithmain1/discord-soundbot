@@ -17,6 +17,10 @@
         button:hover { background: #4752c4; }
         button.danger { background: #da373c; }
         button.danger:hover { background: #a12d2d; }
+        button.secondary { background: #3a3b3f; }
+        button.secondary:hover { background: #4a4b50; }
+        .success { color: #3ba55c; }
+        .sound-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
         .box { margin-bottom: 1.5rem; padding: 1.2rem; background: #2b2d31; border-radius: 8px; }
         .box label { display: block; margin: 0.6rem 0 0.2rem; font-size: 0.9em; color: #b5bac1; }
         .logout-form { float: right; }
@@ -37,6 +41,11 @@
         <p class="error">Only .mp3 and .m4a files are supported.</p>
     {% elif request.query_params.get('error') == 'too_large' %}
         <p class="error">That file is over the 10 MB limit.</p>
+    {% endif %}
+    {% if played == '1' %}
+        <p class="success">Queued for playback.</p>
+    {% elif played == '0' %}
+        <p class="error">Couldn't play - that channel may no longer exist.</p>
     {% endif %}
 
     <div class="layout">
@@ -69,7 +78,7 @@
         <div class="col-right">
             <h3>Uploaded Sounds</h3>
             <table>
-                <tr><th>File</th><th>In use by</th><th></th></tr>
+                <tr><th>File</th><th>In use by</th><th>Actions</th></tr>
                 {% for s in sound_list %}
                 <tr>
                     <td>{{ s.filename }}</td>
@@ -77,11 +86,27 @@
                         {% if s.used_by %}{{ s.used_by | join(', ') }}{% else %}not assigned{% endif %}
                     </td>
                     <td>
-                        <form method="post" action="/delete-sound"
-                              onsubmit="return confirm('Delete {{ s.filename }}? This also clears it from anyone it\'s assigned to.');">
-                            <input type="hidden" name="filename" value="{{ s.filename }}">
-                            <button type="submit" class="danger">Delete</button>
-                        </form>
+                        <div class="sound-actions">
+                            <button type="button" class="secondary"
+                                    onclick="new Audio('/sounds/{{ s.filename }}').play()">▶ Preview</button>
+
+                            <form method="post" action="/play-sound" style="display: contents;">
+                                <input type="hidden" name="filename" value="{{ s.filename }}">
+                                <select name="channel_id" required>
+                                    <option value="">Play in...</option>
+                                    {% for c in voice_channels %}
+                                    <option value="{{ c.id }}">{{ c.label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" {% if not voice_channels %}disabled{% endif %}>Play in Discord</button>
+                            </form>
+
+                            <form method="post" action="/delete-sound"
+                                  onsubmit="return confirm('Delete {{ s.filename }}? This also clears it from anyone it\'s assigned to.');">
+                                <input type="hidden" name="filename" value="{{ s.filename }}">
+                                <button type="submit" class="danger">Delete</button>
+                            </form>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
