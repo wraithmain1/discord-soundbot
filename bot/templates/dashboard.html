@@ -6,16 +6,19 @@
     <style>
         body { font-family: sans-serif; background: #1e1f22; color: #eee; padding: 2rem; }
         h2, h3 { color: #fff; }
-        table { border-collapse: collapse; width: 100%; max-width: 700px; }
+        table { border-collapse: collapse; width: 100%; max-width: 700px; margin-bottom: 2rem; }
         th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #3a3b3f; }
         select { padding: 0.4rem; background: #2b2d31; color: #eee; border: 1px solid #444; border-radius: 4px; }
         input[type=file] { color: #eee; }
         button { padding: 0.4rem 0.9rem; background: #5865f2; color: white; border: none;
                  border-radius: 4px; cursor: pointer; }
         button:hover { background: #4752c4; }
-        .upload-box { margin-top: 2rem; padding: 1.2rem; background: #2b2d31; border-radius: 8px; max-width: 400px; }
+        button.danger { background: #da373c; }
+        button.danger:hover { background: #a12d2d; }
+        .upload-box { margin-top: 0.5rem; padding: 1.2rem; background: #2b2d31; border-radius: 8px; max-width: 400px; }
         .logout-form { float: right; }
         .error { color: #f04747; }
+        .muted { color: #949ba4; font-size: 0.9em; }
         tr form { display: contents; }
     </style>
 </head>
@@ -50,6 +53,29 @@
         {% endfor %}
         {% if not assignments %}
         <tr><td colspan="3">No members found yet — make sure the bot has joined your server(s).</td></tr>
+        {% endif %}
+    </table>
+
+    <h3>Uploaded Sounds</h3>
+    <table>
+        <tr><th>File</th><th>In use by</th><th></th></tr>
+        {% for s in sound_list %}
+        <tr>
+            <td>{{ s.filename }}</td>
+            <td class="muted">
+                {% if s.used_by %}{{ s.used_by | join(', ') }}{% else %}not assigned{% endif %}
+            </td>
+            <td>
+                <form method="post" action="/delete-sound"
+                      onsubmit="return confirm('Delete {{ s.filename }}? This also clears it from anyone it\'s assigned to.');">
+                    <input type="hidden" name="filename" value="{{ s.filename }}">
+                    <button type="submit" class="danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        {% if not sound_list %}
+        <tr><td colspan="3">No sounds uploaded yet.</td></tr>
         {% endif %}
     </table>
 

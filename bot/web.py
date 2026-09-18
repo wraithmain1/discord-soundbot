@@ -1,6 +1,7 @@
 """
-Web dashboard: a login-gated page for uploading mp3s and assigning them
-to Discord users. Runs in the same process/event loop as the bot.
+Web dashboard: a login-gated page for uploading mp3s, assigning them
+to Discord users, and deleting sounds that are no longer needed.
+Runs in the same process/event loop as the bot.
 """
 
 import os
@@ -69,17 +70,32 @@ async def dashboard(request: Request):
     members = bot_instance.get_member_list() if bot_instance else []
     sound_map = load_sound_map()
     SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
-    sounds = sorted(p.name for p in SOUNDS_DIR.glob("*.mp3"))
+    sound_files = sorted(p.name for p in SOUNDS_DIR.glob("*.mp3"))
 
     assignments = [
         {"id": m["id"], "label": m["label"], "current": sound_map.get(m["id"], "")}
         for m in members
     ]
 
+    # For each sound file, list which member labels currently use it, so the
+    # sound list shows what's in use before someone deletes something by accident.
+    label_by_id = {m["id"]: m["label"] for m in members}
+    sounds = []
+    for filename in sound_files:
+        used_by = [
+            label_by_id[uid] for uid, fname in sound_map.items()
+            if fname == filename and uid in label_by_id
+        ]
+        sounds.append({"filename": filename, "used_by": used_by})
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"assignments": assignments, "sounds": sounds},
+        {
+            "assignments": assignments,
+            "sounds": sound_files,
+            "sound_list": sounds,
+        },
     )
 
 
@@ -101,6 +117,30 @@ async def upload_sound(request: Request, file: UploadFile = File(...)):
     dest = SOUNDS_DIR / safe_name
     with open(dest, "wb") as f:
         f.write(contents)
+
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/delete-sound")
+async def delete_sound(request: Request, filename: str = Form(...)):
+    if not _logged_in(request):
+        return RedirectResponse("/login", status_code=303)
+
+    safe_name = Path(filename).name  # guard against path traversal
+    target = SOUNDS_DIR / safe_name
+    if target.exists() and target.suffix.lower() == ".mp3":
+        target.unlink()
+
+    # Clean up any user assignments that pointed at the now-deleted file,
+    # so the dashboard doesn't show a "ghost" assignment.
+    sound_map = load_sound_map()
+    changed = False
+    for user_id in list(sound_map.keys()):
+        if sound_map[user_id] == safe_name:
+            del sound_map[user_id]
+            changed = True
+    if changed:
+        save_sound_map(sound_map)
 
     return RedirectResponse("/", status_code=303)
 
