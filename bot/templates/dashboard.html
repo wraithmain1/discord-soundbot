@@ -6,7 +6,7 @@
     <style>
         body { font-family: sans-serif; background: #1e1f22; color: #eee; padding: 2rem; }
         h2, h3 { color: #fff; }
-        table { border-collapse: collapse; width: 100%; max-width: 700px; margin-bottom: 2rem; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
         th, td { text-align: left; padding: 0.6rem; border-bottom: 1px solid #3a3b3f; }
         select, input[type=number] {
             padding: 0.4rem; background: #2b2d31; color: #eee; border: 1px solid #444; border-radius: 4px;
@@ -17,12 +17,16 @@
         button:hover { background: #4752c4; }
         button.danger { background: #da373c; }
         button.danger:hover { background: #a12d2d; }
-        .box { margin-top: 0.5rem; padding: 1.2rem; background: #2b2d31; border-radius: 8px; max-width: 400px; }
+        .box { margin-bottom: 1.5rem; padding: 1.2rem; background: #2b2d31; border-radius: 8px; }
         .box label { display: block; margin: 0.6rem 0 0.2rem; font-size: 0.9em; color: #b5bac1; }
         .logout-form { float: right; }
         .error { color: #f04747; }
         .muted { color: #949ba4; font-size: 0.9em; }
         tr form { display: contents; }
+
+        .layout { display: flex; gap: 2.5rem; align-items: flex-start; flex-wrap: wrap; }
+        .col-left { flex: 1 1 420px; max-width: 600px; }
+        .col-right { flex: 1 1 360px; max-width: 420px; }
     </style>
 </head>
 <body>
@@ -30,80 +34,86 @@
     <h2>🔊 Discord Sound Bot</h2>
 
     {% if request.query_params.get('error') == 'invalid_type' %}
-        <p class="error">Only .mp3 files are supported.</p>
+        <p class="error">Only .mp3 and .m4a files are supported.</p>
     {% elif request.query_params.get('error') == 'too_large' %}
         <p class="error">That file is over the 10 MB limit.</p>
     {% endif %}
 
-    <h3>User Assignments</h3>
-    <table>
-        <tr><th>User</th><th>Assigned sound</th><th></th></tr>
-        {% for a in assignments %}
-        <tr>
-            <form method="post" action="/assign">
-                <td>{{ a.label }}<input type="hidden" name="user_id" value="{{ a.id }}"></td>
-                <td>
-                    <select name="sound_filename">
-                        <option value="">-- none --</option>
-                        {% for s in sounds %}
-                        <option value="{{ s }}" {% if s == a.current %}selected{% endif %}>{{ s }}</option>
-                        {% endfor %}
-                    </select>
-                </td>
-                <td><button type="submit">Save</button></td>
-            </form>
-        </tr>
-        {% endfor %}
-        {% if not assignments %}
-        <tr><td colspan="3">No members found yet — make sure the bot has joined your server(s).</td></tr>
-        {% endif %}
-    </table>
+    <div class="layout">
+        <div class="col-left">
+            <h3>User Assignments</h3>
+            <table>
+                <tr><th>User</th><th>Assigned sound</th><th></th></tr>
+                {% for a in assignments %}
+                <tr>
+                    <form method="post" action="/assign">
+                        <td>{{ a.label }}<input type="hidden" name="user_id" value="{{ a.id }}"></td>
+                        <td>
+                            <select name="sound_filename">
+                                <option value="">-- none --</option>
+                                {% for s in sounds %}
+                                <option value="{{ s }}" {% if s == a.current %}selected{% endif %}>{{ s }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td><button type="submit">Save</button></td>
+                    </form>
+                </tr>
+                {% endfor %}
+                {% if not assignments %}
+                <tr><td colspan="3">No members found yet — make sure the bot has joined your server(s).</td></tr>
+                {% endif %}
+            </table>
+        </div>
 
-    <h3>Uploaded Sounds</h3>
-    <table>
-        <tr><th>File</th><th>In use by</th><th></th></tr>
-        {% for s in sound_list %}
-        <tr>
-            <td>{{ s.filename }}</td>
-            <td class="muted">
-                {% if s.used_by %}{{ s.used_by | join(', ') }}{% else %}not assigned{% endif %}
-            </td>
-            <td>
-                <form method="post" action="/delete-sound"
-                      onsubmit="return confirm('Delete {{ s.filename }}? This also clears it from anyone it\'s assigned to.');">
-                    <input type="hidden" name="filename" value="{{ s.filename }}">
-                    <button type="submit" class="danger">Delete</button>
+        <div class="col-right">
+            <h3>Uploaded Sounds</h3>
+            <table>
+                <tr><th>File</th><th>In use by</th><th></th></tr>
+                {% for s in sound_list %}
+                <tr>
+                    <td>{{ s.filename }}</td>
+                    <td class="muted">
+                        {% if s.used_by %}{{ s.used_by | join(', ') }}{% else %}not assigned{% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="/delete-sound"
+                              onsubmit="return confirm('Delete {{ s.filename }}? This also clears it from anyone it\'s assigned to.');">
+                            <input type="hidden" name="filename" value="{{ s.filename }}">
+                            <button type="submit" class="danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not sound_list %}
+                <tr><td colspan="3">No sounds uploaded yet.</td></tr>
+                {% endif %}
+            </table>
+
+            <div class="box">
+                <h3>Upload a sound</h3>
+                <p class="muted" style="margin: 0 0 0.6rem;">.mp3 or .m4a, up to 10 MB</p>
+                <form method="post" action="/upload" enctype="multipart/form-data">
+                    <input type="file" name="file" accept=".mp3,.m4a" required>
+                    <button type="submit">Upload</button>
                 </form>
-            </td>
-        </tr>
-        {% endfor %}
-        {% if not sound_list %}
-        <tr><td colspan="3">No sounds uploaded yet.</td></tr>
-        {% endif %}
-    </table>
+            </div>
 
-    <div class="box">
-        <h3>Upload a sound</h3>
-        <p class="muted" style="margin: 0 0 0.6rem;">.mp3 or .m4a, up to 10 MB</p>
-        <form method="post" action="/upload" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".mp3,.m4a" required>
-            <button type="submit">Upload</button>
-        </form>
-    </div>
+            <div class="box">
+                <h3>Timing settings</h3>
+                <form method="post" action="/settings">
+                    <label for="cooldown_seconds">Cooldown (seconds) — ignores repeat join/move events from the same user within this window</label>
+                    <input type="number" step="0.5" min="0" max="60" id="cooldown_seconds"
+                           name="cooldown_seconds" value="{{ settings.cooldown_seconds }}">
 
-    <div class="box">
-        <h3>Timing settings</h3>
-        <form method="post" action="/settings">
-            <label for="cooldown_seconds">Cooldown (seconds) — ignores repeat join/move events from the same user within this window</label>
-            <input type="number" step="0.5" min="0" max="60" id="cooldown_seconds"
-                   name="cooldown_seconds" value="{{ settings.cooldown_seconds }}">
+                    <label for="idle_disconnect_seconds">Idle disconnect (seconds) — how long the bot waits after the last sound before leaving the channel</label>
+                    <input type="number" step="1" min="0" max="600" id="idle_disconnect_seconds"
+                           name="idle_disconnect_seconds" value="{{ settings.idle_disconnect_seconds }}">
 
-            <label for="idle_disconnect_seconds">Idle disconnect (seconds) — how long the bot waits after the last sound before leaving the channel</label>
-            <input type="number" step="1" min="0" max="600" id="idle_disconnect_seconds"
-                   name="idle_disconnect_seconds" value="{{ settings.idle_disconnect_seconds }}">
-
-            <div style="margin-top: 1rem;"><button type="submit">Save settings</button></div>
-        </form>
+                    <div style="margin-top: 1rem;"><button type="submit">Save settings</button></div>
+                </form>
+            </div>
+        </div>
     </div>
 </body>
 </html>
