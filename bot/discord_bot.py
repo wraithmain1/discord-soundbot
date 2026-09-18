@@ -5,6 +5,11 @@ Listens for voice-state updates (join / move between channels), looks up
 the triggering user's assigned sound, and plays it through a per-guild
 playback queue so simultaneous events in the same server play in order
 instead of colliding.
+
+Cooldown and idle-disconnect timing live in config/settings.json so they
+can be changed from the web dashboard without restarting the container.
+The env vars below only supply the starting defaults the first time the
+bot ever runs, before that file exists.
 """
 
 import asyncio
@@ -21,9 +26,10 @@ logger = logging.getLogger("soundbot")
 CONFIG_DIR = Path(os.environ.get("CONFIG_DIR", "/app/config"))
 SOUNDS_DIR = Path(os.environ.get("SOUNDS_DIR", "/app/sounds"))
 SOUND_MAP_PATH = CONFIG_DIR / "sound_map.json"
+SETTINGS_PATH = CONFIG_DIR / "settings.json"
 
-COOLDOWN_SECONDS = float(os.environ.get("COOLDOWN_SECONDS", "3"))
-IDLE_DISCONNECT_SECONDS = float(os.environ.get("IDLE_DISCONNECT_SECONDS", "10"))
+DEFAULT_COOLDOWN_SECONDS = float(os.environ.get("COOLDOWN_SECONDS", "3"))
+DEFAULT_IDLE_DISCONNECT_SECONDS = float(os.environ.get("IDLE_DISCONNECT_SECONDS", "10"))
 
 
 def load_sound_map() -> dict:
@@ -42,6 +48,45 @@ def save_sound_map(mapping: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     with open(SOUND_MAP_PATH, "w") as f:
         json.dump(mapping, f, indent=2)
+
+
+def load_settings() -> dict:
+    """Return {"cooldown_seconds": float, "idle_disconnect_seconds": float}.
+
+    Falls back to the env-var defaults if settings.json doesn't exist yet
+    or can't be parsed.
+    """
+    defaults = {
+        "cooldown_seconds": DEFAULT_COOLDOWN_SECONDS,
+        "idle_disconnect_seconds": DEFAULT_IDLE_DISCONNECT_SECONDS,
+    }
+    if not SETTINGS_PATH.exists():
+        return defaults
+    try:
+        with open(SETTINGS_PATH, "r") as f:
+            data = json.load(f)
+        return {
+            "cooldown_seconds": float(data.get("cooldown_seconds", defaults["cooldown_seconds"])),
+            "idle_disconnect_seconds": float(
+                data.get("idle_disconnect_seconds", defaults["idle_disconnect_seconds"])
+            ),
+        }
+    except (json.JSONDecodeError, OSError, ValueError, TypeError):
+        logger.exception("Failed to read settings, using defaults")
+        return defaults
+
+
+def save_settings(cooldown_seconds: float, idle_disconnect_seconds: float) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(SETTINGS_PATH, "w") as f:
+        json.dump(
+            {
+                "cooldown_seconds": cooldown_seconds,
+                "idle_disconnect_seconds": idle_disconnect_seconds,
+            },
+            f,
+            indent=2,
+        )
 
 
 class SoundBot(discord.Client):
@@ -88,9 +133,10 @@ class SoundBot(discord.Client):
         if not (joined or moved):
             return  # leaving a channel entirely - not handled per spec
 
+        settings = load_settings()
         now = time.monotonic()
         last = self._last_triggered.get(member.id, 0)
-        if now - last < COOLDOWN_SECONDS:
+        if now - last < settings["cooldown_seconds"]:
             logger.debug("Cooldown active for %s, skipping duplicate event", member)
             return
         self._last_triggered[member.id] = now
@@ -155,8 +201,9 @@ class SoundBot(discord.Client):
         await finished.wait()
 
     async def _idle_disconnect(self, guild_id: int):
+        settings = load_settings()
         try:
-            await asyncio.sleep(IDLE_DISCONNECT_SECONDS)
+            await asyncio.sleep(settings["idle_disconnect_seconds"])
         except asyncio.CancelledError:
             return
         guild = self.get_guild(guild_id)

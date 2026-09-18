@@ -1,6 +1,6 @@
 """
-Web dashboard: a login-gated page for uploading mp3s, assigning them
-to Discord users, and deleting sounds that are no longer needed.
+Web dashboard: a login-gated page for uploading sounds (mp3/m4a), assigning
+them to Discord users, deleting sounds, and adjusting bot timing settings.
 Runs in the same process/event loop as the bot.
 """
 
@@ -13,13 +13,20 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from .discord_bot import load_sound_map, save_sound_map, SOUNDS_DIR
+from .discord_bot import (
+    load_sound_map,
+    save_sound_map,
+    load_settings,
+    save_settings,
+    SOUNDS_DIR,
+)
 
 WEB_USERNAME = os.environ["WEB_USERNAME"]
 WEB_PASSWORD = os.environ["WEB_PASSWORD"]
 SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {".mp3", ".m4a"}
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -39,6 +46,12 @@ def set_bot_instance(bot):
 
 def _logged_in(request: Request) -> bool:
     return request.session.get("logged_in") is True
+
+
+def _list_sound_files() -> list[str]:
+    SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
+    files = [p.name for p in SOUNDS_DIR.iterdir() if p.suffix.lower() in ALLOWED_EXTENSIONS]
+    return sorted(files)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -69,8 +82,8 @@ async def dashboard(request: Request):
 
     members = bot_instance.get_member_list() if bot_instance else []
     sound_map = load_sound_map()
-    SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
-    sound_files = sorted(p.name for p in SOUNDS_DIR.glob("*.mp3"))
+    sound_files = _list_sound_files()
+    settings = load_settings()
 
     assignments = [
         {"id": m["id"], "label": m["label"], "current": sound_map.get(m["id"], "")}
@@ -95,6 +108,7 @@ async def dashboard(request: Request):
             "assignments": assignments,
             "sounds": sound_files,
             "sound_list": sounds,
+            "settings": settings,
         },
     )
 
@@ -104,7 +118,8 @@ async def upload_sound(request: Request, file: UploadFile = File(...)):
     if not _logged_in(request):
         return RedirectResponse("/login", status_code=303)
 
-    if not file.filename.lower().endswith(".mp3"):
+    safe_name = Path(file.filename).name
+    if Path(safe_name).suffix.lower() not in ALLOWED_EXTENSIONS:
         return RedirectResponse("/?error=invalid_type", status_code=303)
 
     contents = await file.read()
@@ -112,8 +127,6 @@ async def upload_sound(request: Request, file: UploadFile = File(...)):
         return RedirectResponse("/?error=too_large", status_code=303)
 
     SOUNDS_DIR.mkdir(parents=True, exist_ok=True)
-    # Keep filenames simple/safe - strip any path components.
-    safe_name = Path(file.filename).name
     dest = SOUNDS_DIR / safe_name
     with open(dest, "wb") as f:
         f.write(contents)
@@ -128,7 +141,7 @@ async def delete_sound(request: Request, filename: str = Form(...)):
 
     safe_name = Path(filename).name  # guard against path traversal
     target = SOUNDS_DIR / safe_name
-    if target.exists() and target.suffix.lower() == ".mp3":
+    if target.exists() and target.suffix.lower() in ALLOWED_EXTENSIONS:
         target.unlink()
 
     # Clean up any user assignments that pointed at the now-deleted file,
@@ -156,5 +169,23 @@ async def assign_sound(request: Request, user_id: str = Form(...), sound_filenam
     else:
         sound_map.pop(user_id, None)
     save_sound_map(sound_map)
+
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/settings")
+async def update_settings(
+    request: Request,
+    cooldown_seconds: float = Form(...),
+    idle_disconnect_seconds: float = Form(...),
+):
+    if not _logged_in(request):
+        return RedirectResponse("/login", status_code=303)
+
+    # Keep values sane - no negative or absurd numbers from a stray typo.
+    cooldown_seconds = max(0.0, min(cooldown_seconds, 60.0))
+    idle_disconnect_seconds = max(0.0, min(idle_disconnect_seconds, 600.0))
+
+    save_settings(cooldown_seconds, idle_disconnect_seconds)
 
     return RedirectResponse("/", status_code=303)
