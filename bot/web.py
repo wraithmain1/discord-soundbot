@@ -30,6 +30,12 @@ WEB_USERNAME = os.environ["WEB_USERNAME"]
 WEB_PASSWORD = os.environ["WEB_PASSWORD"]
 SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_hex(32)
 
+# Stamped into the image at build time by the GitHub Actions workflow (see
+# Dockerfile ARG/ENV) - shown on the dashboard so it's obvious which build
+# is actually running, without needing a manually-bumped version number.
+GIT_SHA = os.environ.get("GIT_SHA", "unknown")
+BUILD_TIME = os.environ.get("BUILD_TIME", "unknown")
+
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_UPLOAD_EXTENSIONS = {".mp3", ".m4a"}  # what you're allowed to upload
 ALLOWED_EXTENSIONS = {".mp3"}  # what actually lives in SOUNDS_DIR after conversion
@@ -147,6 +153,8 @@ async def dashboard(request: Request):
             "voice_channels": voice_channels,
             "active_channels": active_channels,
             "played": request.query_params.get("played"),
+            "git_sha": GIT_SHA,
+            "build_time": BUILD_TIME,
         },
     )
 
@@ -299,14 +307,23 @@ async def update_settings(
     request: Request,
     cooldown_seconds: float = Form(...),
     idle_disconnect_seconds: float = Form(...),
+    voice_connect_max_attempts: int = Form(...),
+    voice_connect_retry_delay_seconds: float = Form(...),
 ):
     if not _logged_in(request):
         return RedirectResponse("/login", status_code=303)
 
-    # Keep values sane - no negative or absurd numbers from a stray typo.
+    # Keep values sane - no negative, zero, or absurd numbers from a stray typo.
     cooldown_seconds = max(0.0, min(cooldown_seconds, 60.0))
     idle_disconnect_seconds = max(0.0, min(idle_disconnect_seconds, 600.0))
+    voice_connect_max_attempts = max(1, min(voice_connect_max_attempts, 10))
+    voice_connect_retry_delay_seconds = max(0.0, min(voice_connect_retry_delay_seconds, 30.0))
 
-    save_settings(cooldown_seconds, idle_disconnect_seconds)
+    save_settings(
+        cooldown_seconds,
+        idle_disconnect_seconds,
+        voice_connect_max_attempts,
+        voice_connect_retry_delay_seconds,
+    )
 
     return RedirectResponse("/", status_code=303)

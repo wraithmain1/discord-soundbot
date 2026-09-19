@@ -31,6 +31,16 @@ SETTINGS_PATH = CONFIG_DIR / "settings.json"
 DEFAULT_COOLDOWN_SECONDS = float(os.environ.get("COOLDOWN_SECONDS", "3"))
 DEFAULT_IDLE_DISCONNECT_SECONDS = float(os.environ.get("IDLE_DISCONNECT_SECONDS", "10"))
 
+# Voice connections occasionally time out transiently (network blips between
+# this server and Discord's voice media nodes) even when a retry moments
+# later succeeds fine. These control how hard the bot retries before giving
+# up on a single play attempt. Dashboard-editable, same as the two above -
+# env vars only supply the starting defaults before settings.json exists.
+DEFAULT_VOICE_CONNECT_MAX_ATTEMPTS = int(os.environ.get("VOICE_CONNECT_MAX_ATTEMPTS", "3"))
+DEFAULT_VOICE_CONNECT_RETRY_DELAY_SECONDS = float(
+    os.environ.get("VOICE_CONNECT_RETRY_DELAY_SECONDS", "2")
+)
+
 
 def load_sound_map() -> dict:
     """Return {discord_user_id_str: filename} from disk, or {} if missing/corrupt."""
@@ -51,7 +61,7 @@ def save_sound_map(mapping: dict) -> None:
 
 
 def load_settings() -> dict:
-    """Return {"cooldown_seconds": float, "idle_disconnect_seconds": float}.
+    """Return the current dashboard-editable timing/retry settings.
 
     Falls back to the env-var defaults if settings.json doesn't exist yet
     or can't be parsed.
@@ -59,6 +69,8 @@ def load_settings() -> dict:
     defaults = {
         "cooldown_seconds": DEFAULT_COOLDOWN_SECONDS,
         "idle_disconnect_seconds": DEFAULT_IDLE_DISCONNECT_SECONDS,
+        "voice_connect_max_attempts": DEFAULT_VOICE_CONNECT_MAX_ATTEMPTS,
+        "voice_connect_retry_delay_seconds": DEFAULT_VOICE_CONNECT_RETRY_DELAY_SECONDS,
     }
     if not SETTINGS_PATH.exists():
         return defaults
@@ -70,19 +82,35 @@ def load_settings() -> dict:
             "idle_disconnect_seconds": float(
                 data.get("idle_disconnect_seconds", defaults["idle_disconnect_seconds"])
             ),
+            "voice_connect_max_attempts": int(
+                data.get("voice_connect_max_attempts", defaults["voice_connect_max_attempts"])
+            ),
+            "voice_connect_retry_delay_seconds": float(
+                data.get(
+                    "voice_connect_retry_delay_seconds",
+                    defaults["voice_connect_retry_delay_seconds"],
+                )
+            ),
         }
     except (json.JSONDecodeError, OSError, ValueError, TypeError):
         logger.exception("Failed to read settings, using defaults")
         return defaults
 
 
-def save_settings(cooldown_seconds: float, idle_disconnect_seconds: float) -> None:
+def save_settings(
+    cooldown_seconds: float,
+    idle_disconnect_seconds: float,
+    voice_connect_max_attempts: int,
+    voice_connect_retry_delay_seconds: float,
+) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     with open(SETTINGS_PATH, "w") as f:
         json.dump(
             {
                 "cooldown_seconds": cooldown_seconds,
                 "idle_disconnect_seconds": idle_disconnect_seconds,
+                "voice_connect_max_attempts": voice_connect_max_attempts,
+                "voice_connect_retry_delay_seconds": voice_connect_retry_delay_seconds,
             },
             f,
             indent=2,
@@ -200,14 +228,61 @@ class SoundBot(discord.Client):
             if queue.empty():
                 self._idle_tasks[guild_id] = asyncio.create_task(self._idle_disconnect(guild_id))
 
+    async def _connect_with_retry(
+        self, channel: discord.VoiceChannel, guild: discord.Guild
+    ) -> discord.VoiceClient:
+        """Connects to a voice channel, retrying a couple of times on timeout
+        before giving up. We've seen the exact same channel/guild time out on
+        one attempt and connect cleanly seconds later, which points at a
+        transient network blip rather than a real per-channel problem - so a
+        short retry is worth it before treating it as a real failure.
+        """
+        settings = load_settings()
+        max_attempts = max(1, int(settings["voice_connect_max_attempts"]))
+        retry_delay = max(0.0, settings["voice_connect_retry_delay_seconds"])
+
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await channel.connect()
+            except (asyncio.TimeoutError, TimeoutError) as e:
+                last_error = e
+                logger.warning(
+                    "Voice connect attempt %d/%d timed out for channel %s (guild %s)",
+                    attempt, max_attempts, channel.id, guild.id,
+                )
+                # A failed handshake can still leave a half-open voice client
+                # behind - clear it out before trying again, or the retry
+                # will just fail immediately thinking we're already connected.
+                if guild.voice_client is not None:
+                    try:
+                        await guild.voice_client.disconnect(force=True)
+                    except Exception:
+                        logger.exception("Error cleaning up half-open voice client before retry")
+                if attempt < max_attempts:
+                    await asyncio.sleep(retry_delay)
+        assert last_error is not None
+        raise last_error
+
     async def _play_in_channel(self, channel: discord.VoiceChannel, sound_path: Path):
         guild = channel.guild
         voice_client = guild.voice_client
 
         if voice_client is None:
-            voice_client = await channel.connect()
+            voice_client = await self._connect_with_retry(channel, guild)
         elif voice_client.channel.id != channel.id:
-            await voice_client.move_to(channel)
+            try:
+                await voice_client.move_to(channel)
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.warning(
+                    "Voice move_to timed out for channel %s (guild %s), retrying via fresh connect",
+                    channel.id, guild.id,
+                )
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    logger.exception("Error disconnecting before reconnect after failed move")
+                voice_client = await self._connect_with_retry(channel, guild)
 
         finished = asyncio.Event()
 

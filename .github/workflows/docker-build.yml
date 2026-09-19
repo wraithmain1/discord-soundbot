@@ -26,11 +26,20 @@ jobs:
         id: repo
         run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      - name: Compute build metadata
+        id: meta
+        run: |
+          echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +'%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          build-args: |
+            GIT_SHA=${{ steps.meta.outputs.sha_short }}
+            BUILD_TIME=${{ steps.meta.outputs.build_time }}
           tags: |
             ghcr.io/${{ steps.repo.outputs.name }}:latest
             ghcr.io/${{ steps.repo.outputs.name }}:${{ github.sha }}

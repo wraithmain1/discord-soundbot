@@ -98,8 +98,8 @@
                     </td>
                     <td>
                         <div class="sound-actions">
-                            <button type="button" class="secondary"
-                                    onclick="previewSound('{{ s.filename }}')">▶ Preview</button>
+                            <button type="button" class="secondary preview-btn"
+                                    data-filename="{{ s.filename }}">▶ Preview</button>
 
                             <form method="post" action="/play-sound-here" style="display: contents;">
                                 <input type="hidden" name="filename" value="{{ s.filename }}">
@@ -117,8 +117,7 @@
                                 <button type="submit" {% if not voice_channels %}disabled{% endif %}>Play in Discord</button>
                             </form>
 
-                            <form method="post" action="/delete-sound"
-                                  onsubmit="return confirm('Delete {{ s.filename }}? This also clears it from anyone it\'s assigned to.');">
+                            <form method="post" action="/delete-sound" class="delete-form">
                                 <input type="hidden" name="filename" value="{{ s.filename }}">
                                 <button type="submit" class="danger">Delete</button>
                             </form>
@@ -151,11 +150,23 @@
                     <input type="number" step="1" min="0" max="600" id="idle_disconnect_seconds"
                            name="idle_disconnect_seconds" value="{{ settings.idle_disconnect_seconds }}">
 
+                    <label for="voice_connect_max_attempts">Voice connect max attempts — how many times to retry a timed-out voice connection before giving up</label>
+                    <input type="number" step="1" min="1" max="10" id="voice_connect_max_attempts"
+                           name="voice_connect_max_attempts" value="{{ settings.voice_connect_max_attempts }}">
+
+                    <label for="voice_connect_retry_delay_seconds">Voice retry delay (seconds) — pause between retry attempts</label>
+                    <input type="number" step="0.5" min="0" max="30" id="voice_connect_retry_delay_seconds"
+                           name="voice_connect_retry_delay_seconds" value="{{ settings.voice_connect_retry_delay_seconds }}">
+
                     <div style="margin-top: 1rem;"><button type="submit">Save settings</button></div>
                 </form>
             </div>
         </div>
     </div>
+
+    <p class="muted" style="margin-top: 2rem; font-size: 0.8em;">
+        Build {{ git_sha }} · {{ build_time }}
+    </p>
 
     <script>
         function previewSound(filename) {
@@ -164,12 +175,29 @@
                 alert(
                     "Couldn't preview this file in the browser (" + err.message + ").\n\n" +
                     "This usually means the file's audio codec isn't one Chrome can play " +
-                    "inline (common with some .m4a exports, e.g. Apple Lossless instead of AAC). " +
-                    "It should still work fine with \"Play Here\" or \"Play in Discord\", since " +
-                    "those use the bot's own audio engine instead of the browser's."
+                    "inline. It should still work fine with \"Play Here\" or \"Play in Discord\", " +
+                    "since those use the bot's own audio engine instead of the browser's."
                 );
             });
         }
+
+        // Reading filenames from data-/hidden-input attributes (rather than
+        // embedding them directly into inline JS strings) so that filenames
+        // containing quotes, apostrophes, etc. can't break the script.
+        document.querySelectorAll('.preview-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                previewSound(btn.dataset.filename);
+            });
+        });
+
+        document.querySelectorAll('.delete-form').forEach(function (form) {
+            form.addEventListener('submit', function (e) {
+                const filename = form.querySelector('input[name="filename"]').value;
+                if (!confirm('Delete "' + filename + '"? This also clears it from anyone it is assigned to.')) {
+                    e.preventDefault();
+                }
+            });
+        });
     </script>
 </body>
 </html>
