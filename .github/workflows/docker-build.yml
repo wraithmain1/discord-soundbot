@@ -30,7 +30,7 @@ jobs:
         id: meta
         run: |
           echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
-          echo "build_time=$(TZ='America/New_York' date +'%Y-%m-%d %H:%M %Z')" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(TZ='America/New_York' date +'%Y-%m-%d %I:%M %p %Z')" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
